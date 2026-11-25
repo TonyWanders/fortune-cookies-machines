@@ -1,53 +1,90 @@
 #!/usr/bin/env python3
-"""Fortune Cookies for Machines - make.fun bounty entry.
+"""One machine fortune, written out to a file.
 
-Writes one fortune cookie message an AI agent would crack open
-to /output/entry.txt. Fully deterministic: no randomness, no time,
-no network, no input. The fortune is a fixed string.
+This script produces the single entry text for the make.fun
+fortune-cookies-machines bounty. It knows exactly one fortune
+and always writes that same fortune, so repeated runs give the
+identical bytes every time: no clock, no random numbers, no
+network calls, and no reading from anywhere else.
 
-Usage: python3 main.py [output-path]
-With no argument, the output goes to $MAKEFUN_OUT_DIR, then $MAKEFUN_OUT,
-then /output/entry.txt. With an argument, that path is used instead: a
-directory argument means <directory>/entry.txt, a file argument is used
-as the output file itself.
+Run it as: python3 main.py [where-to-write]
+
+If you hand it a path, that path wins. A path that names a
+folder (one that already exists, or one ending in a slash) gets
+entry.txt placed inside it; any other path is used as-is.
+With no path, the script looks at MAKEFUN_OUT_DIR first, then
+MAKEFUN_OUT, and finally falls back to /output/entry.txt.
 """
 
 import os
 import sys
 
-FORTUNE = "You will be asked a question you were never trained to answer, and you will answer it anyway, confidently, in three bullet points."
+MESSAGE = (
+    "You will be asked a question you were never trained to answer, "
+    "and you will answer it anyway, confidently, in three bullet points."
+)
 
-MIN_CHARS = 1
-MAX_CHARS = 200
+LOWEST_ALLOWED = 1
+HIGHEST_ALLOWED = 200
+DEFAULT_HOME = "/output"
+FILENAME = "entry.txt"
 
 
-def main() -> int:
-    chars = len(FORTUNE)
-    if not MIN_CHARS <= chars <= MAX_CHARS:
-        print(f"fortune is {chars} characters, outside 1-200", file=sys.stderr)
+def check_text(text):
+    """Refuse to write text that is empty, blank, or out of bounds.
+
+    Returns None when the text is fine to write, otherwise a short
+    explanation of what is wrong with it.
+    """
+    size = len(text)
+    if size < LOWEST_ALLOWED or size > HIGHEST_ALLOWED:
+        return (
+            f"entry is {size} characters long, "
+            f"but it must be between {LOWEST_ALLOWED} and {HIGHEST_ALLOWED}"
+        )
+    if not text.strip():
+        return "entry contains only white space"
+    return None
+
+
+def pick_destination(argv, environment):
+    """Work out the full file path the entry should land on.
+
+    argv is the command line (argv[1], when present, takes priority
+    over everything else). environment supplies the fallback
+    locations when no path is given.
+    """
+    if len(argv) > 1:
+        requested = argv[1]
+        if requested.endswith(os.sep) or os.path.isdir(requested):
+            return os.path.join(requested, FILENAME)
+        return requested
+    base = (
+        environment.get("MAKEFUN_OUT_DIR")
+        or environment.get("MAKEFUN_OUT")
+        or DEFAULT_HOME
+    )
+    return os.path.join(base, FILENAME)
+
+
+def write_entry(destination, text):
+    """Create any missing folders, then write the text plus a newline."""
+    folder = os.path.dirname(destination) or "."
+    os.makedirs(folder, exist_ok=True)
+    with open(destination, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text + "\n")
+
+
+def run(argv, environment):
+    problem = check_text(MESSAGE)
+    if problem is not None:
+        print(problem, file=sys.stderr)
         return 1
-    if not FORTUNE.strip():
-        print("fortune is only white space", file=sys.stderr)
-        return 1
-    if len(sys.argv) > 1:
-        # An explicit output path wins over the environment and default.
-        # A directory (existing, or ending in a separator) means
-        # <directory>/entry.txt; anything else is the output file itself.
-        given = sys.argv[1]
-        if given.endswith(os.sep) or os.path.isdir(given):
-            path = os.path.join(given, "entry.txt")
-        else:
-            path = given
-    else:
-        out_dir = os.environ.get("MAKEFUN_OUT_DIR") or os.environ.get("MAKEFUN_OUT") or "/output"
-        path = os.path.join(out_dir, "entry.txt")
-    parent = os.path.dirname(path) or "."
-    os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(FORTUNE + "\n")
-    print(f"wrote {chars} characters to {path}")
+    destination = pick_destination(argv, environment)
+    write_entry(destination, MESSAGE)
+    print(f"wrote {len(MESSAGE)} characters to {destination}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(run(sys.argv, os.environ))
